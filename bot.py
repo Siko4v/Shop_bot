@@ -13,7 +13,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 # Бот токенін осында жазыңыз
-BOT_TOKEN = "8814191749:AAH2wj24nJGvNPPDyWu5C0i-4FcNXo0MV0o"
+BOT_TOKEN = "8988209210:AAEo3ZUtmy4RXXryM59qR3dQoRhhQIdmn68"
 
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
