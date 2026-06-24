@@ -2,6 +2,8 @@ import os
 import asyncio
 import logging
 import sqlite3
+import threading
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
@@ -9,7 +11,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from aiohttp import web
 
 # Бот токенін осында жазыңыз
 BOT_TOKEN = "8814191749:AAH2wj24nJGvNPPDyWu5C0i-4FcNXo0MV0o"
@@ -34,7 +35,6 @@ cursor.execute('''
 ''')
 conn.commit()
 
-# --- FSM (Күйлерді басқару) ---
 class ExpenseForm(StatesGroup):
     waiting_for_custom_category = State()
     waiting_for_custom_item = State()
@@ -43,21 +43,21 @@ class ExpenseForm(StatesGroup):
     waiting_for_period_start = State()
     waiting_for_period_end = State()
 
-# --- RENDER ҮШІН ВЕБ-СЕРВЕР ---
-async def handle(request):
-    return web.Response(text="Expense Bot is running 24/7 successfully!")
+# --- RENDER ПОРТЫН АШЫП ТҰРУ ҮШІН ЖЕҢІЛ СЕРВЕР ---
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server_address = ("", port)
+    class HealthHandler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-type", "text/html")
+            self.end_headers()
+            self.wfile.write(b"Bot is alive 24/7!")
+    
+    httpd = HTTPServer(server_address, HealthHandler)
+    logging.info(f"Health server serving on port {port}")
+    httpd.serve_forever()
 
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get('/', handle)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    port = int(os.environ.get('PORT', 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    logging.info(f"Web server started on port {port}")
-
-# --- КӨМЕКШІ ФУНКЦИЯ ---
 async def delete_after_delay(chat_id: int, message_id: int, delay: int = 10):
     await asyncio.sleep(delay)
     try:
@@ -109,7 +109,7 @@ async def cmd_start(message: types.Message):
     today_str = datetime.now().strftime("%Y-%m-%d")
     await message.answer(f"📅 Бүгінгі күн: **{today_str}**\nТөмендегі мәзірді пайдаланыңыз:", reply_markup=main_menu(), parse_mode="Markdown")
 
-# --- ПРОЦЕСТЕРДІ БАСҚАРУ ---
+# --- ПРОЦЕСТЕР ---
 @dp.callback_query(F.data == "add_expense")
 async def process_add_expense(callback: types.CallbackQuery):
     msg = await callback.message.answer("Санатты таңдаңыз:", reply_markup=categories_menu())
@@ -151,7 +151,7 @@ async def process_bazar_item(callback: types.CallbackQuery, state: FSMContext):
         asyncio.create_task(delete_after_delay(callback.message.chat.id, msg.message_id))
     else:
         await state.update_data(item=item)
-        msg = await message.answer(f"'{item}' үшін сомманы енгізіңіз:")
+        msg = await callback.message.answer(f"'{item}' үшін сомманы енгізіңіз:")
         await state.set_state(ExpenseForm.waiting_for_amount)
         asyncio.create_task(delete_after_delay(callback.message.chat.id, msg.message_id))
     await callback.answer()
@@ -318,4 +318,19 @@ async def process_period_report(callback: types.CallbackQuery, state: FSMContext
             text += f"▪️ {row[0]}: {row[1]} ₸\n"
             
     msg = await callback.message.answer(text, parse_mode="Markdown")
-    asyncio.create_task
+    asyncio.create_task(delete_after_delay(callback.message.chat.id, msg.message_id))
+    await state.clear()
+    await callback.answer()
+
+# --- НЕГІЗГІ ІСКЕ ҚОСУ ФУНКЦИЯСЫ ---
+async def main():
+    # Портты басқа ағында ашып қоямыз
+    server_thread = threading.Thread(target=run_health_server, daemon=True)
+    server_thread.start()
+    
+    logging.info("Starting bot polling...")
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot)
+
+if __name__ == "__main__":
+    asyncio.run(main())
